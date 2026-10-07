@@ -297,6 +297,17 @@ def loss_null(z, **kwargs) -> Scalar:
     return torch.tensor(0.0, device=z.device)
 
 
+def loss_area(z, netp, p_sampler, loss_scale=1.0, area_softness=20.0, **kwargs) -> Scalar:  # eschaerer addition
+    """Inequality constraint: material area (SDF<0) must be at least p_sampler.f_area_min,"""  # eschaerer addition
+    xs = p_sampler.sample_from_domain()  # eschaerer addition
+    y = netp(*tensor_product_xz(xs, z)).squeeze(1)  # eschaerer addition
+    y = einops.rearrange(y, '(bz n) -> bz n', bz=z.shape[0])  # eschaerer addition
+    soft_material = torch.sigmoid(-area_softness * y)  # ~1 in material, ~0 outside  # eschaerer addition
+    f_area_frac = soft_material.mean(dim=1)  # eschaerer addition
+    f_violation = torch.relu(p_sampler.f_area_min - f_area_frac)  # eschaerer addition
+    return loss_scale * f_violation.square().mean()  # eschaerer addition
+
+
 def loss_volume(z, netp: NetWithPartials, p_sampler, vol_frac, x_fem, beta, p, p_const, vol_loss, loss_scale, nf_is_density, **kwargs) -> Grad_Field:
     
     x = x_fem

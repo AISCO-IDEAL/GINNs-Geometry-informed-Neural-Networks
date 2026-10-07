@@ -89,6 +89,9 @@ def get_problem(problem_config, **kwargs):
     elif problem_config['problem_str'] == 'simjeb':
         from GINN.problems.problem_simjeb import ProblemSimjeb
         return ProblemSimjeb(**problem_config, **kwargs)
+    elif problem_config['problem_str'] == 'drillhole':  # eschaerer addition
+        from GINN.problems.problem_drillhole import ProblemDrillhole  # eschaerer addition
+        return ProblemDrillhole(**problem_config, **kwargs)  # eschaerer addition
     else:
         raise ValueError(f'Unknown problem type: {problem_config["problem_str"]}')
 
