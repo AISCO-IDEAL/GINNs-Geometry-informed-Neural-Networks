@@ -118,6 +118,8 @@ class Trainer():
         sched = None
         if self.config.get('use_scheduler', False):
             def warm_and_decay_lr_scheduler(step: int):
+                if self.config.get('scheduler_type', 'exponential') == 'linear':  # eschaerer addition
+                    return max(0.0, 1.0 - step / self.config['decay_steps'])  # reaches 0 at decay_steps
                 return self.config['scheduler_gamma'] ** (step / self.config['decay_steps'])
             sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=warm_and_decay_lr_scheduler)
         # maybe load model, optimizer and scheduler

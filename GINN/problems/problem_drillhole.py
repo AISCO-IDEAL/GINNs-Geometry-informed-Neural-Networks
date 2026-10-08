@@ -83,6 +83,7 @@ class ProblemDrillhole(ProblemBase):
                  area_fraction_min,
                  area_fraction_max=1.0,
                  plot_2d_resolution=100,
+                 domain_margin=0.0,  # mm; the SDF must not cross the inner box inset by this margin
                  **kwargs) -> None:
         super().__init__(nx=nx)
 
@@ -107,7 +108,10 @@ class ProblemDrillhole(ProblemBase):
             dtype=torch.float32,
             device=device,
         )
-        self.envelope = self.bounds
+        f_margin_norm = float(domain_margin) / f_scale
+        self.envelope = self.bounds.clone()
+        self.envelope[:, 0] += f_margin_norm
+        self.envelope[:, 1] -= f_margin_norm
         self.f_area_min = float(area_fraction_min)
         self.f_area_max = float(area_fraction_max)
         self.n_points_domain = n_points_domain
@@ -155,8 +159,8 @@ class ProblemDrillhole(ProblemBase):
 
     def is_inside_envelope(self, a: torch.Tensor):
         """Get mask for points which are inside the envelope (domain)."""
-        return (a[:, 0] >= self.bounds[0, 0]) & (a[:, 0] <= self.bounds[0, 1]) & \
-            (a[:, 1] >= self.bounds[1, 0]) & (a[:, 1] <= self.bounds[1, 1])
+        return (a[:, 0] >= self.envelope[0, 0]) & (a[:, 0] <= self.envelope[0, 1]) & \
+            (a[:, 1] >= self.envelope[1, 0]) & (a[:, 1] <= self.envelope[1, 1])
 
 
 class _AnalyticInterfaceConstraint:
@@ -220,7 +224,7 @@ class _AnalyticEnvelopeConstraint:
 
     def get_sampled_points(self, N: int) -> torch.Tensor:
         import torch
-        device = self.problem.bounds.device
+        device = self.problem.envelope.device
         rng = torch.Generator(device=device)
         rng.manual_seed(0)
         i_on = N // 2
@@ -228,10 +232,10 @@ class _AnalyticEnvelopeConstraint:
 
         # on the rectangle: pick a side proportional to length, then uniform
         sides = torch.tensor([
-            [self.problem.bounds[0, 0], self.problem.bounds[1, 0]],
-            [self.problem.bounds[0, 1], self.problem.bounds[1, 0]],
-            [self.problem.bounds[0, 1], self.problem.bounds[1, 1]],
-            [self.problem.bounds[0, 0], self.problem.bounds[1, 1]],
+            [self.problem.envelope[0, 0], self.problem.envelope[1, 0]],
+            [self.problem.envelope[0, 1], self.problem.envelope[1, 0]],
+            [self.problem.envelope[0, 1], self.problem.envelope[1, 1]],
+            [self.problem.envelope[0, 0], self.problem.envelope[1, 1]],
         ], device=device)  # corners
         side_lens = torch.tensor([
             (sides[0, 0] - sides[1, 0]).abs(),
@@ -260,10 +264,10 @@ class _AnalyticEnvelopeConstraint:
             cand = torch.rand(batch, 2, device=device) * (
                 1.0 + 2.0 * margin
             ) - (0.5 + margin)
-            cand = cand * torch.tensor([self.problem.bounds[0, 1] - self.problem.bounds[0, 0],
-                                        self.problem.bounds[1, 1] - self.problem.bounds[1, 0]], device=device) * 0.5
-            cand = cand + torch.tensor([self.problem.bounds[:, 0].mean(),
-                                        self.problem.bounds[:, 1].mean()], device=device)
+            cand = cand * torch.tensor([self.problem.envelope[0, 1] - self.problem.envelope[0, 0],
+                                        self.problem.envelope[1, 1] - self.problem.envelope[1, 0]], device=device) * 0.5
+            cand = cand + torch.tensor([self.problem.envelope[:, 0].mean(),
+                                        self.problem.envelope[:, 1].mean()], device=device)
             b_out = self.problem.is_inside_envelope(cand).logical_not()
             lst_out.append(cand[b_out])
             i_rem -= int(b_out.sum().item())
@@ -288,7 +292,7 @@ class _AnalyticInsideConstraint:
             batch = 2 * i_rem
             cand = torch.rand(batch, 2, device=device)
             # map to bounds
-            cand = cand * (self.problem.bounds[:, 1] - self.problem.bounds[:, 0]) + self.problem.bounds[:, 0]
+            cand = cand * (self.problem.envelope[:, 1] - self.problem.envelope[:, 0]) + self.problem.envelope[:, 0]
             # reject if inside any hole
             sdfs = torch.stack([
                 _material_sdf_torch(
