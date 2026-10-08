@@ -52,7 +52,8 @@ def _sd_convex_polygon_torch(
     ts_dist = torch.norm(ts_points.unsqueeze(1) - ts_closest, dim=2).min(dim=1)[0]
     # cross product sign: inside vs outside
     ts_pa_edge = ts_pa[:, :, 0] * ts_edge[None, :, 1] - ts_pa[:, :, 1] * ts_edge[None, :, 0]
-    ts_inside = (ts_pa_edge >= 0.0).all(dim=1)
+    # inside for either vertex winding (the sign of all cross products agrees)
+    ts_inside = (ts_pa_edge >= 0.0).all(dim=1) | (ts_pa_edge <= 0.0).all(dim=1)
     ts_sdf = torch.where(ts_inside, -ts_dist, ts_dist)
     return ts_sdf
 
@@ -80,6 +81,7 @@ class ProblemDrillhole(ProblemBase):
                  n_points_envelope,
                  n_points_interfaces,
                  area_fraction_min,
+                 area_fraction_max=1.0,
                  plot_2d_resolution=100,
                  **kwargs) -> None:
         super().__init__(nx=nx)
@@ -107,6 +109,7 @@ class ProblemDrillhole(ProblemBase):
         )
         self.envelope = self.bounds
         self.f_area_min = float(area_fraction_min)
+        self.f_area_max = float(area_fraction_max)
         self.n_points_domain = n_points_domain
         self.n_points_envelope = n_points_envelope
         self.n_points_interfaces = n_points_interfaces
@@ -193,7 +196,7 @@ class _AnalyticInterfaceConstraint:
                 arr_angle = torch.linspace(0.0, 2.0 * math.pi, i_count + 1, device=device)[:-1]
                 arr_dir = torch.stack([arr_angle.cos(), arr_angle.sin()], dim=1)
                 pts = hole["center"] + hole["radius"] * arr_dir
-                normals = arr_dir
+                normals = -arr_dir  # into the hole, like the polygon normals and the SDF gradient
             else:
                 arr_edge = torch.roll(hole["vertices"], -1, dims=0) - hole["vertices"]
                 arr_edge_len = torch.norm(arr_edge, dim=1)
