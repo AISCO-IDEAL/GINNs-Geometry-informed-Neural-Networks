@@ -65,7 +65,7 @@ def opt_step(opt, epoch, model, loss_and_backward_fn, z, z_corners, batch, auto_
 def get_opt(opt_name, opt_params, model_params):
     if opt_name == 'adam':
         param_list = [{'params': model_params}]
-        return Adam(param_list) #, **opt_params)  ## use default parameters
+        return Adam(param_list, lr=opt_params.get('lr', 1e-3))  # honour config lr (default 1e-3 as before)
     elif opt_name == 'lbfgs':
         if "history_size" in opt_params:
             opt_params["history_size"] = int(opt_params["history_size"])

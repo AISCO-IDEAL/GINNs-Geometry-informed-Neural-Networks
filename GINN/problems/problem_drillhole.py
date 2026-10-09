@@ -114,6 +114,8 @@ class ProblemDrillhole(ProblemBase):
         self.envelope[:, 1] -= f_margin_norm
         self.f_area_min = float(area_fraction_min)
         self.f_area_max = float(area_fraction_max)
+        # benchmark mass term: lambda_mass / lambda_area, 0 = off (see loss_area)
+        self.f_mass_weight_rel = float(kwargs.get('mass_weight_rel', 0.0))
         self.n_points_domain = n_points_domain
         self.n_points_envelope = n_points_envelope
         self.n_points_interfaces = n_points_interfaces
