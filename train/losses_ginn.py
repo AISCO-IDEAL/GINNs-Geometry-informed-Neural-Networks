@@ -315,7 +315,10 @@ def loss_area(z, netp, p_sampler, loss_scale=1.0, area_softness=20.0, **kwargs) 
     f_violation = torch.relu(p_sampler.f_area_min - f_area_frac) + torch.relu(f_area_frac - p_sampler.f_area_max)  # eschaerer addition
     # benchmark mass term: lambda_area * sqrt(viol^2 + (w * mass)^2) = lambda_mass * mass when the bounds hold  # eschaerer addition
     f_mass_term = getattr(p_sampler, 'f_mass_weight_rel', 0.0) * f_area_frac                                    # eschaerer addition
-    return loss_scale * (f_violation.square() + f_mass_term.square()).mean()                                    # eschaerer addition
+    f_loss = f_violation.square() + f_mass_term.square()                                                          # eschaerer addition
+    # the ALM calculator takes sqrt(loss); sqrt'(0) = inf times the zero gradient is NaN, so cut the graph at exactly 0  # eschaerer addition
+    f_loss = torch.where(f_loss > 0.0, f_loss, torch.zeros_like(f_loss))                                          # eschaerer addition
+    return loss_scale * f_loss.mean()                                                                             # eschaerer addition
 
 
 def loss_volume(z, netp: NetWithPartials, p_sampler, vol_frac, x_fem, beta, p, p_const, vol_loss, loss_scale, nf_is_density, **kwargs) -> Grad_Field:
