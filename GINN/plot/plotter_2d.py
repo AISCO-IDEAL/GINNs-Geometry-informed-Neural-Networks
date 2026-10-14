@@ -86,7 +86,7 @@ class Plotter2d():
         for i_shape in range(len(grad_fields)):
             ax = axs[i_shape]
             gf_i = grad_fields[i_shape]
-            im = ax.imshow(gf_i, origin='lower', extent=self.envelope.flatten())
+            im = ax.imshow(gf_i, origin='lower', extent=self.envelope.flatten().cpu().numpy())
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.1)  # Adjust the size and pad as needed
             plt.colorbar(im, cax=cax)
