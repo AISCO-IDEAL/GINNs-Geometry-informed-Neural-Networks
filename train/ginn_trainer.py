@@ -70,7 +70,12 @@ class Trainer():
             from GINN.fenitop.heaviside_filter import heaviside
             feni_kwargs = self.config['FEM'].copy()
             
-            if self.config['problem']['problem_str'] == 'simjeb':
+            if self.config['FEM'].get('external_backend_module'):
+                # eschaerer addition: external FEM backend, a module with make_backend(config, problem),
+                # e.g. gurken.benchmarks.ginn_env.fea_bridge for the drillhole problem
+                import importlib
+                self.feni = importlib.import_module(self.config['FEM']['external_backend_module']).make_backend(self.config, self.problem)
+            elif self.config['problem']['problem_str'] == 'simjeb':
                 feni_kwargs['interface_pts'] = self.problem.constr_pts_dict['interface']
                 feni_kwargs['envelope_mesh'] = self.problem.mesh_env
                 feni_kwargs['envelope_unnormalized'] = self.problem.mesh_env.bounds.T
@@ -78,7 +83,8 @@ class Trainer():
             else:
                 feni_kwargs['envelope_unnormalized'] = self.problem.envelope_unnormalized.cpu().numpy()
                 feni_kwargs['bounds_unnormalized'] = self.problem.bounds_unnormalized
-            self.feni = FenitopMP(device=torch.get_default_device(), bz=self.config['ginn_bsize'], mp_pool=mp_top, np_func_inside_envelope=self.problem.is_inside_envelope, **feni_kwargs)
+            if self.feni is None:  # eschaerer addition: keep an external backend
+                self.feni = FenitopMP(device=torch.get_default_device(), bz=self.config['ginn_bsize'], mp_pool=mp_top, np_func_inside_envelope=self.problem.is_inside_envelope, **feni_kwargs)
             self.beta = self.config['beta_sched']['init']
             
         # data
@@ -182,7 +188,7 @@ class Trainer():
                         self.plotter.reset_output(self.problem.recalc_output(self.netp, z_plot, **self.config['meshing']), epoch=epoch)
                         self.mpm.plot(self.plotter.plot_shape, 'plot_shape', arg_list=['Train Boundary', vis_pts_dict])
                     
-                if self.config['lambda_comp'] > 0:
+                if self.config['lambda_comp'] > 0 and hasattr(self.feni, 'sort_idcs'):  # eschaerer addition: external backends plot themselves
                     with torch.no_grad():
                         chosen_rho_field = self.netp(*tensor_product_xz(self.feni.fem_xy_torch_device, z_plot)).view(len(z_plot), -1)
                     # for some strange reason k3d.volume expects the axes as (z, y, x)
@@ -286,7 +292,9 @@ class Trainer():
                                     math.log2(self.config['beta_sched']['max'])))  # exponential increase; log formulation avoids numerical issues
                 print(f'beta: {self.beta}')
             
-            if not self.config['FEM']['use_filters']:
+            if hasattr(self.feni, 'rho_from_field'):  # eschaerer addition: the backend maps the field to densities
+                rho_flat = self.feni.rho_from_field(rho_flat, epoch)
+            elif not self.config['FEM']['use_filters']:
                 rho_flat = heaviside(rho_flat, beta=self.beta, nf_is_density=self.config['nf_is_density'])
             
             if epoch > self.config['p_sched'].get('start_iter', 0) and epoch % self.config['p_sched']['interval'] == 0:
