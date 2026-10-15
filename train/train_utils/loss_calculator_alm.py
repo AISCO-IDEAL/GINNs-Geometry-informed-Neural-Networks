@@ -24,6 +24,8 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
+        # eschaerer addition: constraint below its tolerance counts as met, its multiplier stops growing
+        self.tolerance = kwargs.get('tolerance') or {}
         
         subloss_keys = [key for key in self.loss_keys if key != obj_key]
         
@@ -41,7 +43,11 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         
     def _compute_scalar_subloss(self, key, sub_loss, is_objective=False):
         
-        sub_loss_unweighted = torch.sqrt(sub_loss)
+        tol = self.tolerance.get(key.base_key, 0.)
+        if tol > 0. and not is_objective:  # eschaerer addition: sqrt(L + 1e-12) - 1e-6 keeps the gradient finite at 0
+            sub_loss_unweighted = torch.sqrt(torch.clamp(sub_loss - tol, min=0.) + 1e-12) - 1e-6
+        else:
+            sub_loss_unweighted = torch.sqrt(sub_loss)
         # from run jiwtocmu, sqrt seems to be important
         # print(f'WARNING: testing if we should take sqrt of the loss or not')
         # sub_loss_unweighted = sub_loss
