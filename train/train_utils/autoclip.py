@@ -9,6 +9,7 @@ class AutoClip:
                  auto_clip_percentile,
                  auto_clip_hist_len,
                  auto_clip_min_len,
+                 history_start=0,  # eschaerer addition: norms of the first steps (warm-up) are not recorded
                  ):
         """
         Initializes the AutoClip instance, inspired by https://arxiv.org/abs/2007.14469
@@ -39,6 +40,8 @@ class AutoClip:
         self.gradient_norms = torch.zeros(self.history_size)
         self.cur_idx = 0
         self.cnt = 0
+        self.history_start = history_start
+        self.steps = 0
 
 
     def update_gradient_norm_history(self, gradient_norm):
@@ -46,6 +49,9 @@ class AutoClip:
         Updates the history of gradient norms.
         :param gradient_norm: The norm of the most recent gradient.
         """
+        self.steps += 1  # eschaerer addition
+        if self.steps <= self.history_start:
+            return
         self.gradient_norms[self.cur_idx] = gradient_norm
         self.cur_idx = (self.cur_idx + 1) % self.history_size
         self.cnt += 1

@@ -26,6 +26,12 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         self.epsilon = epsilon
         # eschaerer addition: constraint below its tolerance counts as met, its multiplier stops growing
         self.tolerance = kwargs.get('tolerance') or {}
+        # eschaerer addition (as gurken augmented_lagrangian.py): consistent start sets nu and mu of a
+        # constraint at its first non-zero value s by the update rule; phr_keys are inequalities g <= 0
+        # given as signed g with the Powell-Hestenes-Rockafellar term and update, mu fixed after start
+        self.consistent_start = kwargs.get('consistent_start', False)
+        self.phr_keys = set(kwargs.get('phr_keys') or [])
+        self.started = set()
         
         subloss_keys = [key for key in self.loss_keys if key != obj_key]
         
@@ -41,6 +47,13 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         self.lagrangian_loss_dict = {}
         self.mu_loss_dict = {}
         
+    def _start(self, key, value):  # eschaerer addition
+        if not self.consistent_start or key.base_key in self.started or value <= 0.:
+            return
+        self.started.add(key.base_key)
+        self.nu[key.nu_key] = torch.as_tensor(value, dtype=torch.float32, device=self.nu[key.nu_key].device)
+        self.mu[key.mu_key] = self.gamma / (torch.sqrt(self.nu[key.nu_key]) + self.epsilon)
+
     def _compute_scalar_subloss(self, key, sub_loss, is_objective=False):
         
         tol = self.tolerance.get(key.base_key, 0.)
@@ -51,6 +64,8 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         # from run jiwtocmu, sqrt seems to be important
         # print(f'WARNING: testing if we should take sqrt of the loss or not')
         # sub_loss_unweighted = sub_loss
+        if not is_objective:
+            self._start(key, float(sub_loss_unweighted))  # eschaerer addition
         lagrangian_loss = self.lamda[key.lambda_key] * sub_loss_unweighted
         # L = lambda_o * objective + lambda_i * C_i + mu_i * sqrt(C).square()
         # for the objective we only want the lambda_o * objective  
@@ -73,6 +88,19 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         # TODO: AR IMPORTANT: double-check if torch.mean or if we should take sqrt first
         # sub_loss_unweighted = torch.sqrt(sub_loss)
         sub_loss_unweighted = sub_loss
+        if key.base_key in self.phr_keys:  # eschaerer addition: PHR inequality, sub_loss is the signed g
+            self._start(key, float(torch.abs(sub_loss)))
+            lam, mu = self.lamda[key.lambda_key], self.mu[key.mu_key]
+            shifted = torch.clamp(lam + mu * sub_loss, min=0.)
+            sub_loss_weighted = (shifted ** 2 - lam ** 2) / (2. * mu)
+            self.loss_unweighted_dict[key.loss_unweighted_key] = sub_loss
+            self.lagrangian_loss_dict[key.lambda_key] = sub_loss_weighted
+            self.mu_loss_dict[key.mu_key] = 0.
+            self.loss_weighted_dict[key.loss_key] = sub_loss_weighted
+            self.sub_grad_field_dict[key] = shifted * grad_field
+            return sub_loss_weighted
+        if not is_objective:
+            self._start(key, float(sub_loss_unweighted))  # eschaerer addition
         lambda_loss = self.lamda[key.lambda_key] * sub_loss_unweighted
         if is_objective:
             mu_loss = 0.    
@@ -110,7 +138,7 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
             is_objective = key==self.obj_key
             if key in self.field_loss_keys:
                 assert val[0].dim() == 0, f"Field loss {key} should be a scalar"
-                assert val[0] >= 0, f"Field loss {key} should be non-negative"
+                assert val[0] >= 0 or key.base_key in self.phr_keys, f"Field loss {key} should be non-negative"
                 # for a field, val is a tuple, e.g. (batch_C, batch_dCdrho)
                 loss += self._compute_field_subloss(key, *val, is_objective=is_objective)  # unpack tuple
             elif key in self.scalar_loss_keys:
@@ -124,6 +152,9 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         with torch.no_grad():
             for key in self.loss_keys:
                 if key == self.obj_key:
+                    continue
+                if key.base_key in self.phr_keys:  # eschaerer addition: PHR update, mu stays
+                    self.lamda[key.lambda_key] = torch.clamp(self.lamda[key.lambda_key] + self.mu[key.mu_key] * self.loss_unweighted_dict[key.loss_unweighted_key], min=0.)
                     continue
                 
                 self.nu[key.nu_key] = self.nu[key.nu_key] * self.alpha + (1-self.alpha) * self.loss_unweighted_dict[key.loss_unweighted_key]
