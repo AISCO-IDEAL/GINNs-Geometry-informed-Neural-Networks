@@ -84,6 +84,8 @@ class ProblemDrillhole(ProblemBase):
                  area_fraction_max=1.0,
                  plot_2d_resolution=100,
                  domain_margin=0.0,  # mm; the SDF must not cross the inner box inset by this margin
+                 hole_band_margin=0.0,  # mm; hole band |hole SDF| < margin for loss_hole_band, 0 = no band  # eschaerer addition
+                 n_points_hole_band=2048,  # eschaerer addition
                  **kwargs) -> None:
         super().__init__(nx=nx)
 
@@ -119,6 +121,8 @@ class ProblemDrillhole(ProblemBase):
         self.n_points_domain = n_points_domain
         self.n_points_envelope = n_points_envelope
         self.n_points_interfaces = n_points_interfaces
+        self.f_hole_band_margin_norm = float(hole_band_margin) / f_scale  # eschaerer addition
+        self.n_points_hole_band = n_points_hole_band  # eschaerer addition
 
         # Convert holes to normalised coordinates
         self.lst_holes_norm = []
@@ -158,6 +162,34 @@ class ProblemDrillhole(ProblemBase):
             self.bounds.cpu(), plot_2d_resolution, plot_2d_resolution
         )
         self.xs = torch.tensor(xs, dtype=torch.float32, device=device)
+
+    def hole_sdf(self, ts_points: torch.Tensor) -> torch.Tensor:  # eschaerer addition
+        """Material SDF of all holes (max over holes, positive inside a hole), normalised units."""
+        return torch.stack([
+            _material_sdf_torch(ts_points, h["shape_code"], h["center"], h["radius"], h["vertices"])
+            for h in self.lst_holes_norm
+        ]).max(dim=0).values
+
+    def sample_from_hole_band(self) -> tuple[torch.Tensor, torch.Tensor]:  # eschaerer addition
+        """Points uniform in the band |g| < margin on both sides of the hole boundaries.
+
+        Returns the points [N, 2] and the hole SDF g [N] there, in normalised units.
+        Fresh points on every call; candidates are drawn in the whole domain and rejected
+        outside the band (the same band as the gurken ``ConstraintField.sample_band_pool``).
+        """
+        assert self.f_hole_band_margin_norm > 0.0, 'hole_band_margin must be positive'
+        device = self.bounds.device
+        lst_pts, lst_g = [], []
+        i_found = 0
+        while i_found < self.n_points_hole_band:
+            cand = torch.rand(4 * self.n_points_hole_band, 2, device=device)
+            cand = cand * (self.bounds[:, 1] - self.bounds[:, 0]) + self.bounds[:, 0]
+            g = self.hole_sdf(cand)
+            b_band = g.abs() < self.f_hole_band_margin_norm
+            lst_pts.append(cand[b_band])
+            lst_g.append(g[b_band])
+            i_found += int(b_band.sum().item())
+        return torch.cat(lst_pts)[:self.n_points_hole_band], torch.cat(lst_g)[:self.n_points_hole_band]
 
     def is_inside_envelope(self, a: torch.Tensor):
         """Get mask for points which are inside the envelope (domain)."""

@@ -397,6 +397,7 @@ class Trainer():
             'if': partial(loss_if, netp=self.netp, p_sampler=self.problem, level_set=self.config['level_set']),
             'if_normal': partial(loss_if_normal, netp=self.netp, p_sampler=self.problem, ginn_bsize=self.config['ginn_bsize'], loss_scale=self.config.get('scale_if_normal', 1), nf_is_density=self.config['nf_is_density']),
             'area': partial(loss_area, netp=self.netp, p_sampler=self.problem, loss_scale=self.config.get('scale_area', 1.0)),  # eschaerer addition
+            'hole_band': partial(loss_hole_band, netp=self.netp, p_sampler=self.problem, loss_scale=self.config.get('scale_hole_band', 1.0), leaky_slope=self.config.get('hole_band_leaky_slope', 0.01)),  # eschaerer addition
             
             # global
             'eikonal': partial(loss_eikonal, p_sampler=self.problem, netp=self.netp, scale_eikonal=self.config.get('scale_eikonal', 1), nf_is_density=self.config['nf_is_density']),

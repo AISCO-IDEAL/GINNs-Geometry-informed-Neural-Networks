@@ -321,6 +321,15 @@ def loss_area(z, netp, p_sampler, loss_scale=1.0, area_softness=20.0, **kwargs) 
     return loss_scale * f_loss.mean()                                                                             # eschaerer addition
 
 
+def loss_hole_band(z, netp, p_sampler, loss_scale=1.0, leaky_slope=0.01, **kwargs) -> Scalar:                       # eschaerer addition
+    """Band constraint: f must not be on the wrong side of the hole SDF g within |g| < margin."""               # eschaerer addition
+    xs, g = p_sampler.sample_from_hole_band()                                                                      # eschaerer addition
+    y = netp(*tensor_product_xz(xs, z)).squeeze(1)                                                                 # eschaerer addition
+    y = einops.rearrange(y, '(bz n) -> bz n', bz=z.shape[0])                                                       # eschaerer addition
+    violation = torch.where(g <= 0.0, y - g, g - y)  # positive on the wrong side, g is a constant                 # eschaerer addition
+    return loss_scale * F.leaky_relu(violation, leaky_slope).square().mean()                                       # eschaerer addition
+
+
 def loss_volume(z, netp: NetWithPartials, p_sampler, vol_frac, x_fem, beta, p, p_const, vol_loss, loss_scale, nf_is_density, **kwargs) -> Grad_Field:
 
     x = x_fem
