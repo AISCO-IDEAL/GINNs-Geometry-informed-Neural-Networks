@@ -80,8 +80,6 @@ class ProblemDrillhole(ProblemBase):
                  n_points_domain,
                  n_points_envelope,
                  n_points_interfaces,
-                 area_fraction_min,
-                 area_fraction_max=1.0,
                  plot_2d_resolution=100,
                  domain_margin=0.0,  # mm; the SDF must not cross the inner box inset by this margin
                  **kwargs) -> None:
@@ -112,10 +110,6 @@ class ProblemDrillhole(ProblemBase):
         self.envelope = self.bounds.clone()
         self.envelope[:, 0] += f_margin_norm
         self.envelope[:, 1] -= f_margin_norm
-        self.f_area_min = float(area_fraction_min)
-        self.f_area_max = float(area_fraction_max)
-        # benchmark mass term: lambda_mass / lambda_area, 0 = off (see loss_area)
-        self.f_mass_weight_rel = float(kwargs.get('mass_weight_rel', 0.0))
         self.n_points_domain = n_points_domain
         self.n_points_envelope = n_points_envelope
         self.n_points_interfaces = n_points_interfaces
