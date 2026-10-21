@@ -27,6 +27,8 @@ def get_is_out_mask(x, bounds):
     return out_mask
 
 def is_every_n_epochs_fulfilled(epoch, config, key):
+    if key == 'save_every_n_epochs' and config.get('save_epochs') is not None:  # eschaerer addition
+        return (epoch in config['save_epochs']) or (epoch == config['max_epochs'] - 1)
     if key not in config:
         return False
     is_fulfilled = (epoch % config[key] == 0) or (epoch == config['max_epochs'] - 1)
