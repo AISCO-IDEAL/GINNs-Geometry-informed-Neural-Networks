@@ -94,6 +94,9 @@ def get_problem(problem_config, **kwargs):
     elif problem_config['problem_str'] == 'drillhole':  # eschaerer addition
         from GINN.problems.problem_drillhole import ProblemDrillhole  # eschaerer addition
         return ProblemDrillhole(**problem_config, **kwargs)  # eschaerer addition
+    elif problem_config['problem_str'] == 'gurken_2d':  # gurken addition
+        from GINN.problems.problem_gurken_2d import ProblemGurken2d  # gurken addition
+        return ProblemGurken2d(**problem_config, **kwargs)  # gurken addition
     else:
         raise ValueError(f'Unknown problem type: {problem_config["problem_str"]}')
 
