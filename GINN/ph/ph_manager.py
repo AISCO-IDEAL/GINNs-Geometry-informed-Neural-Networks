@@ -92,7 +92,7 @@ class PHManager():
         
         if self.problem_str == 'simjeb':
             xs_load = torch.load(os.path.join(self.simjeb_root_dir, 'x_domain_grid.pt'), map_location='cuda' if torch.cuda.is_available() else 'cpu')
-            if torch.equal(xs_load, xs_flat):
+            if xs_load.shape == xs.shape and torch.allclose(xs_load, xs, atol=1e-6):  # eschaerer addition: the cache stores xs; float round-off differs between machines
                 print("Loading PH manager grid classification from file")
                 xs_inside_envelope_mask = torch.load(os.path.join(self.simjeb_root_dir, 'x_domain_inside_envelop.pt'), map_location='cuda' if torch.cuda.is_available() else 'cpu')
             else:
