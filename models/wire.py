@@ -188,10 +188,12 @@ class ConditionalWIRE(nn.Module):
                  hidden_omega_0=30., 
                  scale=10.0, 
                  use_legacy_gabor=False, 
+                 skip_connections=False,  # eschaerer addition: residual h + layer(h) on the hidden Gabor layers
                  **kwargs):
         super().__init__()
         self.layers = layers
         self.return_density = return_density
+        self.skip_connections = skip_connections
         self.first_omega_0 = first_omega_0
         self.hidden_omega_0 = hidden_omega_0
         self.scale = scale
@@ -230,5 +232,11 @@ class ConditionalWIRE(nn.Module):
     def forward(self, x, z):
         # convert to the right data type
         xz = torch.cat([x, z], dim=-1)
-        output = self.net(xz)
-        return output
+        if not self.skip_connections:
+            output = self.net(xz)
+            return output
+        # eschaerer addition: hidden Gabor layers are net[1 .. len(layers) - 3]
+        h = xz
+        for i, layer in enumerate(self.net):
+            h = h + layer(h) if 1 <= i <= len(self.layers) - 3 else layer(h)
+        return h
