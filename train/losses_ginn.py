@@ -305,22 +305,6 @@ def loss_null(z, **kwargs) -> Scalar:
     return torch.tensor(0.0, device=z.device)
 
 
-def loss_area(z, netp, p_sampler, loss_scale=1.0, area_softness=20.0, **kwargs) -> Scalar:                         # eschaerer addition
-    """Inequality constraint: material area (SDF<0) must lie within [f_area_min, f_area_max]."""                   # eschaerer addition
-    xs = p_sampler.sample_from_domain()                                                                            # eschaerer addition
-    y = netp(*tensor_product_xz(xs, z)).squeeze(1)                                                                 # eschaerer addition
-    y = einops.rearrange(y, '(bz n) -> bz n', bz=z.shape[0])                                                       # eschaerer addition
-    soft_material = torch.sigmoid(-area_softness * y)                                                              # eschaerer addition
-    f_area_frac = soft_material.mean(dim=1)                                                                        # eschaerer addition
-    f_violation = torch.relu(p_sampler.f_area_min - f_area_frac) + torch.relu(f_area_frac - p_sampler.f_area_max)  # eschaerer addition
-    # benchmark mass term: lambda_area * sqrt(viol^2 + (w * mass)^2) = lambda_mass * mass when the bounds hold  # eschaerer addition
-    f_mass_term = getattr(p_sampler, 'f_mass_weight_rel', 0.0) * f_area_frac                                    # eschaerer addition
-    f_loss = f_violation.square() + f_mass_term.square()                                                          # eschaerer addition
-    # the ALM calculator takes sqrt(loss); sqrt'(0) = inf times the zero gradient is NaN, so cut the graph at exactly 0  # eschaerer addition
-    f_loss = torch.where(f_loss > 0.0, f_loss, torch.zeros_like(f_loss))                                          # eschaerer addition
-    return loss_scale * f_loss.mean()                                                                             # eschaerer addition
-
-
 def loss_volume(z, netp: NetWithPartials, p_sampler, vol_frac, x_fem, beta, p, p_const, vol_loss, loss_scale, nf_is_density, **kwargs) -> Grad_Field:
 
     x = x_fem

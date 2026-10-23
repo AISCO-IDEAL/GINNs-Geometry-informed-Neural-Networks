@@ -80,10 +80,9 @@ class ProblemDrillhole(ProblemBase):
                  n_points_domain,
                  n_points_envelope,
                  n_points_interfaces,
-                 area_fraction_min,
-                 area_fraction_max=1.0,
                  plot_2d_resolution=100,
                  domain_margin=0.0,  # mm; the SDF must not cross the inner box inset by this margin
+                 diversity_hole_margin=0.0,  # mm; diversity points keep this distance to every hole
                  **kwargs) -> None:
         super().__init__(nx=nx)
 
@@ -109,13 +108,10 @@ class ProblemDrillhole(ProblemBase):
             device=device,
         )
         f_margin_norm = float(domain_margin) / f_scale
+        self.f_diversity_margin_norm = float(diversity_hole_margin) / f_scale
         self.envelope = self.bounds.clone()
         self.envelope[:, 0] += f_margin_norm
         self.envelope[:, 1] -= f_margin_norm
-        self.f_area_min = float(area_fraction_min)
-        self.f_area_max = float(area_fraction_max)
-        # benchmark mass term: lambda_mass / lambda_area, 0 = off (see loss_area)
-        self.f_mass_weight_rel = float(kwargs.get('mass_weight_rel', 0.0))
         self.n_points_domain = n_points_domain
         self.n_points_envelope = n_points_envelope
         self.n_points_interfaces = n_points_interfaces
@@ -142,13 +138,16 @@ class ProblemDrillhole(ProblemBase):
         interface_constr = _AnalyticInterfaceConstraint(self)
         envelope_constr = _AnalyticEnvelopeConstraint(self)
         inside_constr = _AnalyticInsideConstraint(self)
+        # diversity points (sample_from_inside_envelope) keep diversity_hole_margin to every hole: near a
+        # hole the hole constraint decides the design, not the latent; eikonal points (sample_from_domain) do not
+        diversity_constr = _AnalyticInsideConstraint(self, self.f_diversity_margin_norm)
 
         self.constr_pts_dict = {}
 
         self._envelope_constr = [envelope_constr]
         self._interface_constraints = [interface_constr]
         self._obstacle_constraints = []
-        self._inside_envelope = inside_constr
+        self._inside_envelope = diversity_constr
         self._domain = inside_constr
 
         # Grid for contour/meshing
@@ -278,10 +277,11 @@ class _AnalyticEnvelopeConstraint:
 
 
 class _AnalyticInsideConstraint:
-    """Domain interior points (outside holes) for eikonal loss."""
+    """Domain interior points at least ``f_hole_margin_norm`` outside every hole (0: outside the holes)."""
 
-    def __init__(self, problem: ProblemDrillhole):
+    def __init__(self, problem: ProblemDrillhole, f_hole_margin_norm: float = 0.0):
         self.problem = problem
+        self.f_hole_margin_norm = f_hole_margin_norm
 
     def get_sampled_points(self, N: int) -> torch.Tensor:
         import torch
@@ -307,7 +307,7 @@ class _AnalyticInsideConstraint:
                 for h in self.problem.lst_holes_norm
             ])
             # material SDF < 0 means IN material (solid, not in hole)
-            b_in = (sdfs < 0.0).all(dim=0)
+            b_in = (sdfs < -self.f_hole_margin_norm).all(dim=0)
             lst_in.append(cand[b_in])
             i_rem -= int(b_in.sum().item())
         return torch.cat(lst_in)[:N]
