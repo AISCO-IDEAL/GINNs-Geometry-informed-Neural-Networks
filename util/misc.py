@@ -27,6 +27,8 @@ def get_is_out_mask(x, bounds):
     return out_mask
 
 def is_every_n_epochs_fulfilled(epoch, config, key):
+    if key == 'save_every_n_epochs' and config.get('save_epochs') is not None:  # eschaerer addition
+        return (epoch in config['save_epochs']) or (epoch == config['max_epochs'] - 1)
     if key not in config:
         return False
     is_fulfilled = (epoch % config[key] == 0) or (epoch == config['max_epochs'] - 1)
@@ -92,6 +94,9 @@ def get_problem(problem_config, **kwargs):
     elif problem_config['problem_str'] == 'drillhole':  # eschaerer addition
         from GINN.problems.problem_drillhole import ProblemDrillhole  # eschaerer addition
         return ProblemDrillhole(**problem_config, **kwargs)  # eschaerer addition
+    elif problem_config['problem_str'] == 'gurken_2d':  # gurken addition
+        from GINN.problems.problem_gurken_2d import ProblemGurken2d  # gurken addition
+        return ProblemGurken2d(**problem_config, **kwargs)  # gurken addition
     else:
         raise ValueError(f'Unknown problem type: {problem_config["problem_str"]}')
 
