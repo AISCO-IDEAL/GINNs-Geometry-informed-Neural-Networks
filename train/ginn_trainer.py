@@ -233,6 +233,13 @@ class Trainer():
 
             self.loss_calculator.adaptive_update()  # is a no-op for ManualWeightedLoss
 
+            ## eschaerer addition: external redistancing hook (config 'redistancing', redistancing_external_module)
+            if self.config.get('redistancing', {}).get('external_module'):
+                if not hasattr(self, 'redistancer'):
+                    import importlib
+                    self.redistancer = importlib.import_module(self.config['redistancing']['external_module']).make_redistancer(self.config)
+                cur_log_dict.update(self.redistancer.after_step(self.model, epoch))
+
             ## Async Logging
             cur_log_dict.update({
                 'neg_loss_div': (-1) * loss_log_dict['loss_div'] if 'loss_div' in loss_log_dict else 0.0,
