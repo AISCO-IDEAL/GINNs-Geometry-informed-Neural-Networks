@@ -65,7 +65,8 @@ class Trainer():
         
         # FEM interface
         self.feni = None
-        if self.config['lambda_comp'] > 0 or self.config['lambda_vol'] > 0:
+        # eschaerer addition: vol_without_fem, lambda_vol is GINN's scalar loss_volume (no FEM)
+        if (self.config['lambda_comp'] > 0 or self.config['lambda_vol'] > 0) and not self.config.get('vol_without_fem', False):
             from GINN.fenitop.fenitop_mp import FenitopMP
             from GINN.fenitop.heaviside_filter import heaviside
             feni_kwargs = self.config['FEM'].copy()
@@ -286,6 +287,8 @@ class Trainer():
                             
         ## compute TO sublosses
         x_fem = None
+        if self.config.get('vol_without_fem', False):  # eschaerer addition: mass points of loss_volume, outside the holes
+            x_fem = self.problem._domain.get_sampled_points(self.config['n_points_vol'])
         if self.config['lambda_comp'] > 0:
             x_fem = self.feni.fem_xy_torch_device
             if self.config['FEM']['add_x_offset']:
@@ -400,6 +403,10 @@ class Trainer():
             # global
             'eikonal': partial(loss_eikonal, p_sampler=self.problem, netp=self.netp, scale_eikonal=self.config.get('scale_eikonal', 1), nf_is_density=self.config['nf_is_density']),
             'scc': partial(loss_scc, ph_manager=self.ph_manager),
+            # eschaerer addition: vol_without_fem, the mass fraction as a scalar loss (vol not in field_losses)
+            'vol': partial(loss_volume, netp=self.netp, p_sampler=self.problem, vol_frac=self.config.get('vol_frac', 0.0),
+                           beta=self.config.get('vol_beta', 1.0), p_const=1, vol_loss=self.config.get('vol_loss', 'mse_pushdown'),
+                           loss_scale=self.config.get('scale_vol', 1.0), nf_is_density=self.config['nf_is_density']),
             'curv': partial(loss_curv, netp=self.netp, logger=self.logger, \
                             max_curv=self.config['max_curv'], device=torch.get_default_device(), \
                             loss_scale=self.config.get('scale_curv', 1.0),
