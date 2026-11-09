@@ -21,7 +21,7 @@ def calc_3d_ph_4d_array_full(Y_slice: np.ndarray,
                         ph_loss_sub0: bool,
                         HOLE_LEVEL: float,
                         )-> np.ndarray:
-    ph = cripser.computePH(Y_slice, maxdim=maxdim)
+    ph = compute_ph_in_grid(Y_slice, maxdim)
     
     return calc_ph_loss_crisper_slice(z,
                                ph,
@@ -35,6 +35,33 @@ def calc_3d_ph_4d_array_full(Y_slice: np.ndarray,
                                HOLE_LEVEL,
     )
     
+
+I_PH_RETRIES = 3  # eschaerer addition
+
+
+def _rows_in_grid(ph: np.ndarray, shape: tuple) -> np.ndarray:
+    """eschaerer addition: rows [N] whose birth and death cells lie inside the grid."""
+    nx = len(shape)
+    arr_shape = np.asarray(shape)
+    births, deaths = ph[:, 3:3+nx], ph[:, 6:6+nx]
+    return ((births >= 0) & (births < arr_shape) & (deaths >= 0) & (deaths < arr_shape)).all(axis=1)
+
+
+def compute_ph_in_grid(Y_slice: np.ndarray, maxdim: int) -> np.ndarray:
+    """eschaerer addition: cripser.computePH with every cell coordinate inside the grid.
+
+    cripser 0.0.13 sporadically returns cell coordinates wrapped around 2**32 (e.g. 4294967285)
+    for a 3D grid with inf cells outside the envelope; GINN indexes the PH grid with them (CUDA
+    index-out-of-bounds assert). A recomputation of the same array is correct, so recompute up
+    to I_PH_RETRIES times, then drop the remaining out-of-grid rows.
+    """
+    ph = cripser.computePH(Y_slice, maxdim=maxdim)
+    for _ in range(I_PH_RETRIES):
+        if _rows_in_grid(ph, Y_slice.shape).all():
+            return ph
+        ph = cripser.computePH(Y_slice, maxdim=maxdim)
+    return ph[_rows_in_grid(ph, Y_slice.shape)]
+
 
 # TODO: cleanup: don't need slice if z is passed for current shape only
 def calc_ph_loss_crisper_slice(z:np.ndarray, 
