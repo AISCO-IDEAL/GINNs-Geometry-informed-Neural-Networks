@@ -26,6 +26,7 @@ from GINN.ph.ph_manager import PHManager
 from GINN.speed.timer import Timer
 from train.train_utils.latent_sampler import LatentSampler
 from util.checkpointing import load_model_optim_sched, save_model_every_n_epochs
+from util.model_utils import chunked_forward  # eschaerer addition
 from util.misc import combine_dicts, do_plot, get_model, get_problem, is_every_n_epochs_fulfilled
 from train.losses_ginn import *
 from train.train_utils.loss_calculator_alm import AdaptiveAugmentedLagrangianLoss
@@ -137,6 +138,15 @@ class Trainer():
             sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=warm_and_decay_lr_scheduler)
         # maybe load model, optimizer and scheduler
         self.model, opt, sched = load_model_optim_sched(self.config, self.model, opt, sched)
+        # eschaerer addition: centre_points_path (npy [N, nx], GINN frame): shift the output by its
+        # median there at z = 0, so the zero level cuts the design region (D-47 of global_csg)
+        if self.config.get('centre_points_path'):
+            import numpy as np
+            pts = torch.as_tensor(np.load(self.config['centre_points_path']), dtype=torch.get_default_dtype())
+            with torch.no_grad():
+                y = self.netp(pts, torch.zeros(len(pts), self.config['nz']))
+                self.model.net[-1].bias -= y.median()
+            self.logger.info(f'Output shifted by {-float(y.median())} (median over the centre points)')
         
         # get z
         z = self.z_sampler.train_z()
@@ -175,7 +185,8 @@ class Trainer():
 
             ## training
             self.model.train()
-            if epoch > 0 and is_every_n_epochs_fulfilled(epoch, self.config, 'reset_zlatents_every_n_epochs'):
+            # eschaerer addition: fixed_latents keeps the training latents of the start (successive halving)
+            if not self.config.get('fixed_latents', False) and epoch > 0 and is_every_n_epochs_fulfilled(epoch, self.config, 'reset_zlatents_every_n_epochs'):
                 z = self.z_sampler.train_z()
             # only plot the GINN points in the first epoch, as they are memory-intensive
             # if self.feni.constraint_to_pts_dict if epoch > 0 else combine_dicts([self.feni.constraint_to_pts_dict, self.problem.constr_pts_dict])
@@ -252,6 +263,17 @@ class Trainer():
             self.log_history_dict[epoch] = cur_log_dict
             self.log_to_wandb(epoch)
             save_model_every_n_epochs(self.model, opt, sched, self.config, epoch)
+            ## eschaerer addition: external backend epoch hook (successive halving, early stop)
+            dict_action = self.feni.end_of_epoch(epoch, z) if hasattr(self.feni, 'end_of_epoch') else {}
+            if dict_action.get('keep') is not None:
+                z = z[torch.as_tensor(dict_action['keep'], dtype=torch.long, device=z.device)]
+                self.set_num_shapes(len(z))
+            if dict_action.get('stop'):
+                if not is_every_n_epochs_fulfilled(epoch, self.config, 'save_every_n_epochs'):
+                    self.config['save_epochs'] = list(self.config.get('save_epochs') or []) + [epoch]
+                    save_model_every_n_epochs(self.model, opt, sched, self.config, epoch)
+                self.logger.info(f'Early stop after epoch {epoch}')
+                break
             pbar.set_description(f"{epoch}:" + " ".join([f"{k.replace('loss_', '')}:{v.item():.1e}" for k, v in loss_log_dict.items() if "loss_" in k and "unweighted" not in k]))
         
         ## Final logging
@@ -259,6 +281,16 @@ class Trainer():
         ## Finished
         self.timer.print_logbook()
 
+
+    def set_num_shapes(self, n_shapes):  # eschaerer addition: successive halving
+        """Shapes per batch after a prune; the diversity is off once one shape is left."""
+        for section in (self.config, self.config['latent_sampling'], self.config.get('surface', {}), self.config.get('ph', {})):
+            if 'ginn_bsize' in section:
+                section['ginn_bsize'] = n_shapes
+        self.z_sampler.batch_size = n_shapes
+        if n_shapes == 1:
+            self.config['start_div'] = float('inf')
+        self.loss_dispatcher = self.init_loss_dispatcher()  # partials hold ginn_bsize
 
     def losses_and_backward(self, z, epoch, batch=None, z_corners=None):
 
@@ -300,7 +332,8 @@ class Trainer():
             x_fem = self.feni.fem_xy_torch_device
             if self.config['FEM']['add_x_offset']:
                 x_fem = x_fem + (torch.rand(self.feni.fem_xy_torch_device.shape) - 0.5) * self.feni.grid_dist
-            rho_flat = self.netp(*tensor_product_xz(x_fem, z)).squeeze(1)
+            # eschaerer addition: forward_chunk_points (memory only) evaluates in checkpointed chunks
+            rho_flat = chunked_forward(self.netp, *tensor_product_xz(x_fem, z), self.config['FEM'].get('forward_chunk_points')).squeeze(1)
             
             # update beta
             if epoch > self.config['beta_sched'].get('start_iter', 0) and epoch % self.config['beta_sched']['interval'] == 0:

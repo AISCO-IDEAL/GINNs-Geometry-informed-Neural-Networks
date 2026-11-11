@@ -41,3 +41,13 @@ def tensor_product_xz_np(x, z):
     x_tp = np.tile(x, (bz, 1))
 
     return x_tp, z_tp
+
+def chunked_forward(netp, x, z, chunk=None):  # eschaerer addition
+    """netp(x, z) on [n, nx], [n, nz]; with chunk, in chunks of that many points whose activations
+    are recomputed in the backward (torch.utils.checkpoint): the same values, less memory."""
+    if not chunk:
+        return netp(x, z)
+    import torch
+    from torch.utils.checkpoint import checkpoint
+    return torch.cat([checkpoint(netp, x[i:i + chunk], z[i:i + chunk], use_reentrant=False)
+                      for i in range(0, len(x), chunk)])
