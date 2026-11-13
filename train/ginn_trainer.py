@@ -185,8 +185,7 @@ class Trainer():
 
             ## training
             self.model.train()
-            # eschaerer addition: fixed_latents keeps the training latents of the start (successive halving)
-            if not self.config.get('fixed_latents', False) and epoch > 0 and is_every_n_epochs_fulfilled(epoch, self.config, 'reset_zlatents_every_n_epochs'):
+            if epoch > 0 and is_every_n_epochs_fulfilled(epoch, self.config, 'reset_zlatents_every_n_epochs'):
                 z = self.z_sampler.train_z()
             # only plot the GINN points in the first epoch, as they are memory-intensive
             # if self.feni.constraint_to_pts_dict if epoch > 0 else combine_dicts([self.feni.constraint_to_pts_dict, self.problem.constr_pts_dict])
@@ -263,17 +262,6 @@ class Trainer():
             self.log_history_dict[epoch] = cur_log_dict
             self.log_to_wandb(epoch)
             save_model_every_n_epochs(self.model, opt, sched, self.config, epoch)
-            ## eschaerer addition: external backend epoch hook (successive halving, early stop)
-            dict_action = self.feni.end_of_epoch(epoch, z) if hasattr(self.feni, 'end_of_epoch') else {}
-            if dict_action.get('keep') is not None:
-                z = z[torch.as_tensor(dict_action['keep'], dtype=torch.long, device=z.device)]
-                self.set_num_shapes(len(z))
-            if dict_action.get('stop'):
-                if not is_every_n_epochs_fulfilled(epoch, self.config, 'save_every_n_epochs'):
-                    self.config['save_epochs'] = list(self.config.get('save_epochs') or []) + [epoch]
-                    save_model_every_n_epochs(self.model, opt, sched, self.config, epoch)
-                self.logger.info(f'Early stop after epoch {epoch}')
-                break
             pbar.set_description(f"{epoch}:" + " ".join([f"{k.replace('loss_', '')}:{v.item():.1e}" for k, v in loss_log_dict.items() if "loss_" in k and "unweighted" not in k]))
         
         ## Final logging
@@ -281,16 +269,6 @@ class Trainer():
         ## Finished
         self.timer.print_logbook()
 
-
-    def set_num_shapes(self, n_shapes):  # eschaerer addition: successive halving
-        """Shapes per batch after a prune; the diversity is off once one shape is left."""
-        for section in (self.config, self.config['latent_sampling'], self.config.get('surface', {}), self.config.get('ph', {})):
-            if 'ginn_bsize' in section:
-                section['ginn_bsize'] = n_shapes
-        self.z_sampler.batch_size = n_shapes
-        if n_shapes == 1:
-            self.config['start_div'] = float('inf')
-        self.loss_dispatcher = self.init_loss_dispatcher()  # partials hold ginn_bsize
 
     def losses_and_backward(self, z, epoch, batch=None, z_corners=None):
 
