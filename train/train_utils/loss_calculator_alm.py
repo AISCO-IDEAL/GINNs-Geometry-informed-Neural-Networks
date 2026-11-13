@@ -32,6 +32,10 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         self.consistent_start = kwargs.get('consistent_start', False)
         self.phr_keys = set(kwargs.get('phr_keys') or [])
         self.started = set()
+        # eschaerer addition (as gurken f_phr_mu, f_phr_g_clip): fixed mu of the phr_keys instead of
+        # the consistent start, and an upper clip of g in their lambda update; None: off
+        self.phr_mu = kwargs.get('phr_mu')
+        self.phr_g_clip = kwargs.get('phr_g_clip')
         
         subloss_keys = [key for key in self.loss_keys if key != obj_key]
         
@@ -41,6 +45,11 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
         # # add objective lambda explicitly and don't set to 1, as it is like a constant scale factor of the loss
         # self.lamda[obj_key.lambda_key] = torch.tensor(lambda_dict[obj_key], device=torch.get_default_device())
         self.mu = { key.mu_key: torch.tensor(1.0, device=torch.get_default_device()) for key in subloss_keys }
+        if self.phr_mu is not None:  # eschaerer addition
+            for key in subloss_keys:
+                if key.base_key in self.phr_keys:
+                    self.mu[key.mu_key] = torch.tensor(float(self.phr_mu), device=torch.get_default_device())
+                    self.started.add(key.base_key)
         self.nu = { key.nu_key: torch.tensor(0.0, device=torch.get_default_device()) for key in subloss_keys }
 
         self.loss_unweighted_dict = {}
@@ -154,7 +163,10 @@ class AdaptiveAugmentedLagrangianLoss(LossCalculator):
                 if key == self.obj_key:
                     continue
                 if key.base_key in self.phr_keys:  # eschaerer addition: PHR update, mu stays
-                    self.lamda[key.lambda_key] = torch.clamp(self.lamda[key.lambda_key] + self.mu[key.mu_key] * self.loss_unweighted_dict[key.loss_unweighted_key], min=0.)
+                    g = self.loss_unweighted_dict[key.loss_unweighted_key]
+                    if self.phr_g_clip is not None:
+                        g = torch.clamp(g, max=float(self.phr_g_clip))
+                    self.lamda[key.lambda_key] = torch.clamp(self.lamda[key.lambda_key] + self.mu[key.mu_key] * g, min=0.)
                     continue
                 
                 self.nu[key.nu_key] = self.nu[key.nu_key] * self.alpha + (1-self.alpha) * self.loss_unweighted_dict[key.loss_unweighted_key]
