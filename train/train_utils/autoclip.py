@@ -9,7 +9,7 @@ class AutoClip:
                  auto_clip_percentile,
                  auto_clip_hist_len,
                  auto_clip_min_len,
-                 history_start=0,  # eschaerer addition: norms of the first steps (warm-up) are not recorded
+                 history_start=0,  # eschaerer addition: norms of the first steps (warm-up) form a provisional history
                  ):
         """
         Initializes the AutoClip instance, inspired by https://arxiv.org/abs/2007.14469
@@ -50,8 +50,12 @@ class AutoClip:
         :param gradient_norm: The norm of the most recent gradient.
         """
         self.steps += 1  # eschaerer addition
-        if self.steps <= self.history_start:
-            return
+        # eschaerer addition (quantile_so_far): the norms of the warm-up form a provisional
+        # history, discarded at the first step after it
+        if self.history_start > 0 and self.steps == self.history_start + 1:
+            self.gradient_norms.zero_()
+            self.cur_idx = 0
+            self.cnt = 0
         self.gradient_norms[self.cur_idx] = gradient_norm
         self.cur_idx = (self.cur_idx + 1) % self.history_size
         self.cnt += 1
@@ -67,7 +71,9 @@ class AutoClip:
         if not self.auto_clip_enabled or self.cnt < self.min_history_length:
             return self.default_clip_value  # Return default value if AutoClip is disabled or history is too short
         
-        return torch.quantile(self.gradient_norms, self.percentile)
+        # eschaerer addition (quantile_so_far): the quantile of the recorded norms only, so that
+        # auto_clip_min_len 1 clips to the quantile of the norms so far from the first step
+        return torch.quantile(self.gradient_norms[:min(self.cnt, self.history_size)], self.percentile)
     
     def get_last_gradient_norm(self):
         """
